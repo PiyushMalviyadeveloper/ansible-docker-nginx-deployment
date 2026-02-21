@@ -1,0 +1,65 @@
+---
+- name: Deploy Secure Nginx Container (Conditional Docker Install)
+  hosts: webserver
+  become: yes
+  collections:
+    - community.docker
+    - ansible.posix
+
+  tasks:
+
+    - name: Check if Docker is installed
+      command: docker --version
+      register: docker_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Add Docker CE repository if Docker not installed
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+      when: docker_check.rc != 0
+
+    - name: Install yum-utils (required for repo management)
+      yum:
+        name: yum-utils
+        state: present
+      when: docker_check.rc != 0
+
+    - name: Install Docker CE from official repo
+      yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        disable_gpg_check: yes
+      when: docker_check.rc != 0
+
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: docker_check.rc != 0
+
+    - name: Pull Nginx image
+      community.docker.docker_image:
+        name: nginx
+        source: pull
+
+    - name: Run Nginx container
+      community.docker.docker_container:
+        name: secure_nginx
+        image: nginx
+        state: started
+        restart_policy: always
+        ports:
+          - "8080:80"
+
+    - name: Open HTTP in firewall
+      ansible.posix.firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
